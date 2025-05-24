@@ -136,9 +136,9 @@ impl Drop for LogFile {
 ///
 /// ```rust
 /// # use kvs::KvStore;
-/// let mut store = KvStore::new();
+/// let mut store = KvStore::open(".").unwrap();
 /// store.set("key".to_owned(), "value".to_owned());
-/// let val = store.get("key".to_owned());
+/// let val = store.get("key".to_owned()).unwrap();
 /// assert_eq!(val, Some("value".to_owned()));
 /// ```
 pub struct KvStore {
