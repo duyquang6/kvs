@@ -52,8 +52,12 @@ fn main() {
 
             let result = store.get(key);
             match result {
-                Ok(inner) => {
-                    println!("{}", inner);
+                Ok(inner_opt) => {
+                    if let Some(inner) = inner_opt {
+                        println!("{}", inner);
+                    } else {
+                        println!("Key not found");
+                    }
                     exit(0)
                 }
                 Err(err) => {
@@ -68,7 +72,7 @@ fn main() {
             match result {
                 Ok(_) => exit(0),
                 Err(err) => {
-                    eprintln!("{}", err);
+                    println!("{}", err);
                     exit(1)
                 }
             }

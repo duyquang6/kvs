@@ -132,7 +132,7 @@ impl Drop for LogFile {
 
 impl Default for LogFile {
     fn default() -> Self {
-        Self::new("/tmp/kvs")
+        Self::new(".")
     }
 }
 
@@ -179,7 +179,7 @@ impl KvStore {
     /// Gets the string value of a given string key.
     ///
     /// Returns `None` if the given key does not exist.
-    pub fn get(&mut self, key: String) -> Result<String> {
+    pub fn get(&mut self, key: String) -> Result<Option<String>> {
         let mut buf = [0; 1000];
         self.log_file.rewind_head()?;
         let mut value = None;
@@ -205,11 +205,7 @@ impl KvStore {
             }
         }
 
-        let Some(inner) = value else {
-            return Err(format_err!("key not found"));
-        };
-
-        Ok(inner)
+        Ok(value)
     }
 
     /// Remove a given key.
@@ -240,7 +236,7 @@ impl KvStore {
         }
 
         let Some(_) = value else {
-            return Err(format_err!("key not found"));
+            return Err(format_err!("Key not found"));
         };
 
         // Found key, insert to log
