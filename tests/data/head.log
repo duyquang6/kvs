@@ -1,3 +1,5 @@
-abc
-xyz
-def
+{"cmd":"Set","params":["key","value"]}
+{"cmd":"Set","params":["key2","value2"]}
+{"cmd":"Set","params":["key3","value3"]}
+{"cmd":"Rm","params":"key"}
+{"cmd":"Set","params":["key3","value4"]}

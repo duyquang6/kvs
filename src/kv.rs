@@ -105,29 +105,20 @@ mod tests {
         let n = log_file
             .read_until('\n', &mut buf)
             .expect("read until failed");
-        assert_eq!(n, 4);
+        assert_eq!(n, 39);
         assert_eq!(
-            "abc\n",
+            "{\"cmd\":\"Set\",\"params\":[\"key\",\"value\"]}\n",
             str::from_utf8(&buf[0..n]).expect("convert string failed")
         );
 
         let n = log_file
             .read_until('\n', &mut buf)
             .expect("read until failed");
-        assert_eq!(n, 4);
+        assert_eq!(n, 41);
         assert_eq!(
-            "xyz\n",
+            "{\"cmd\":\"Set\",\"params\":[\"key2\",\"value2\"]}\n",
             str::from_utf8(&buf[0..n]).expect("convert string failed")
         );
-
-        let n = log_file
-            .read_until('\n', &mut buf)
-            .expect("read until failed");
-        assert_eq!(n, 3);
-        assert_eq!(
-            "def",
-            str::from_utf8(&buf[0..n]).expect("convert string failed")
-        )
     }
 }
 
