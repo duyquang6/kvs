@@ -6,7 +6,7 @@ use std::{
 };
 
 use failure::format_err;
-use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
 
 use crate::Result;
 
