@@ -1,6 +1,7 @@
 use std::{
+    collections::HashMap,
     fs::{File, OpenOptions},
-    io::{Read, Seek, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::PathBuf,
 };
 
@@ -42,19 +43,14 @@ impl LogFile {
         Self { head_log: f }
     }
 
-    fn insert(&mut self, buf: &[u8]) -> Result<usize> {
+    fn append(&mut self, buf: &[u8]) -> Result<usize> {
         let file_index = self.head_log.seek(std::io::SeekFrom::End(0))?;
-
+        let mut n = 0;
         if file_index > 0 {
-            self.head_log.write(b"\n")?;
+            n += self.head_log.write(b"\n")?;
         }
-        self.head_log.write(buf)?;
-        Ok(buf.len())
-    }
-
-    fn rewind_head(&mut self) -> Result<()> {
-        self.head_log.rewind()?;
-        Ok(())
+        n += self.head_log.write(buf)?;
+        Ok(n)
     }
 
     fn read_until(&mut self, delimiter: char, buf: &mut [u8]) -> Result<usize> {
@@ -65,8 +61,8 @@ impl LogFile {
             if n == 0 {
                 break;
             }
-            for index in offset..offset + n {
-                if buf[index] == delimiter as u8 {
+            for (index, &current_char) in buf.iter().enumerate().skip(offset).take(n) {
+                if current_char == delimiter as u8 {
                     // Rewind to index delimiter + 1
                     self.head_log
                         .seek_relative((index - offset + 1) as i64 - n as i64)?;
@@ -76,7 +72,24 @@ impl LogFile {
             }
             offset += n;
         }
+
         Ok(offset)
+    }
+
+    fn current_file_offset(&mut self) -> Result<u64> {
+        let offset = self.head_log.stream_position()?;
+        Ok(offset)
+    }
+
+    fn read_until_from_offset(
+        &mut self,
+        delimiter: char,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<usize> {
+        self.head_log.seek(SeekFrom::Start(offset))?;
+        let n = self.read_until(delimiter, buf)?;
+        Ok(n)
     }
 }
 
@@ -116,23 +129,11 @@ mod tests {
             str::from_utf8(&buf[0..n]).expect("convert string failed")
         )
     }
-
-    // #[test]
-    // fn test_insert_commands() {
-    //     let set_cmd = Command::Set("key".to_string(), "value".to_string());
-    //     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    // }
 }
 
 impl Drop for LogFile {
     fn drop(&mut self) {
         self.head_log.flush().expect("flush WAL error");
-    }
-}
-
-impl Default for LogFile {
-    fn default() -> Self {
-        Self::new(".")
     }
 }
 
@@ -149,9 +150,9 @@ impl Default for LogFile {
 /// let val = store.get("key".to_owned());
 /// assert_eq!(val, Some("value".to_owned()));
 /// ```
-#[derive(Default)]
 pub struct KvStore {
     log_file: LogFile,
+    log_pointer_map: HashMap<String, u64>,
 }
 
 impl KvStore {
@@ -161,17 +162,55 @@ impl KvStore {
         let Some(path) = path.as_path().to_str() else {
             return Err(format_err!("cannot convert path"));
         };
-        let log_file = LogFile::new(path);
-        Ok(KvStore { log_file })
+        let mut log_file = LogFile::new(path);
+        let mut log_pointer_map = HashMap::new();
+
+        let mut buf = [0; 1000];
+        loop {
+            let n = log_file.read_until('\n', &mut buf)?;
+            if n == 0 {
+                break;
+            }
+
+            let cmd: Command = serde_json::from_slice(&buf[0..n])?;
+            match cmd {
+                Command::Set(k, _) => {
+                    let log_offset = log_file.current_file_offset()? - n as u64;
+                    log_pointer_map
+                        .entry(k)
+                        .and_modify(|e| *e = log_offset)
+                        .or_insert(log_offset);
+                }
+
+                Command::Rm(k) => {
+                    log_pointer_map
+                        .remove(&k)
+                        .expect("WAL log invalid, remove key non existed");
+                }
+            }
+        }
+
+        Ok(KvStore {
+            log_file,
+            log_pointer_map,
+        })
     }
 
     /// Sets the value of a string key to a string.
     ///
     /// If the key already exists, the previous value will be overwritten.
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        let cmd = Command::Set(key, value);
+        let cmd = Command::Set(key.clone(), value);
+
         let serde_bytes = serde_json::to_vec(&cmd)?;
-        self.log_file.insert(&serde_bytes)?;
+        self.log_file.append(&serde_bytes)?;
+        let log_offset = self.log_file.current_file_offset()? - serde_bytes.len() as u64;
+
+        // Update in-mem map log pointer
+        self.log_pointer_map
+            .entry(key)
+            .and_modify(|e| *e = log_offset)
+            .or_insert(log_offset);
 
         Ok(())
     }
@@ -180,69 +219,31 @@ impl KvStore {
     ///
     /// Returns `None` if the given key does not exist.
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
+        let Some(&offset) = self.log_pointer_map.get(&key) else {
+            return Ok(None);
+        };
         let mut buf = [0; 1000];
-        self.log_file.rewind_head()?;
-        let mut value = None;
-        loop {
-            let n = self.log_file.read_until('\n', &mut buf)?;
-            if n == 0 {
-                break;
-            }
-
-            let cmd: Command = serde_json::from_slice(&buf[0..n])?;
-            match cmd {
-                Command::Set(k, v) => {
-                    if k == key {
-                        value = Some(v)
-                    }
-                }
-
-                Command::Rm(k) => {
-                    if k == key {
-                        value = None
-                    }
-                }
-            }
+        let n = self
+            .log_file
+            .read_until_from_offset('\n', offset, &mut buf)?;
+        let cmd: Command = serde_json::from_slice(&buf[0..n])?;
+        match cmd {
+            Command::Set(_, value) => Ok(Some(value)),
+            _ => panic!("invalid write a head log offset"),
         }
-
-        Ok(value)
     }
 
     /// Remove a given key.
     pub fn remove(&mut self, key: String) -> Result<()> {
-        let mut buf = [0; 1000];
-        self.log_file.rewind_head()?;
-        let mut value = None;
-        loop {
-            let n = self.log_file.read_until('\n', &mut buf)?;
-            if n == 0 {
-                break;
-            }
-
-            let cmd: Command = serde_json::from_slice(&buf[0..n])?;
-            match cmd {
-                Command::Set(k, v) => {
-                    if k == key {
-                        value = Some(v)
-                    }
-                }
-
-                Command::Rm(k) => {
-                    if k == key {
-                        value = None
-                    }
-                }
-            }
-        }
-
-        let Some(_) = value else {
+        let offset = self.log_pointer_map.remove(&key);
+        if offset.is_none() {
             return Err(format_err!("Key not found"));
-        };
+        }
 
         // Found key, insert to log
         let cmd = Command::Rm(key);
         let serde_data = serde_json::to_vec(&cmd)?;
-        self.log_file.insert(&serde_data)?;
+        self.log_file.append(&serde_data)?;
 
         Ok(())
     }

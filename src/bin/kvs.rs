@@ -32,7 +32,7 @@ fn main() {
         )
         .get_matches();
 
-    let mut store = KvStore::default();
+    let mut store = KvStore::open(".").expect("open error");
 
     match matches.subcommand() {
         ("set", Some(_matches)) => {
