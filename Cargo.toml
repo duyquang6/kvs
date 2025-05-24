@@ -2,7 +2,7 @@
 name = "kvs"
 version = "0.1.0"
 description = "A key-value store"
-edition = "2024"
+edition = "2018"
 
 [dependencies]
 clap = "2.32.0"

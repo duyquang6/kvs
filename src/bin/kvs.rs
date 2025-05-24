@@ -1,4 +1,5 @@
 use clap::{App, AppSettings, Arg, SubCommand};
+use kvs::KvStore;
 use std::process::exit;
 
 fn main() {
@@ -31,18 +32,46 @@ fn main() {
         )
         .get_matches();
 
+    let mut store = KvStore::default();
+
     match matches.subcommand() {
         ("set", Some(_matches)) => {
-            eprintln!("unimplemented");
-            exit(1);
+            let key = _matches.value_of("KEY").unwrap().to_string();
+            let value = _matches.value_of("VALUE").unwrap().to_string();
+
+            let result = store.set(key, value);
+            if let Err(err) = result {
+                eprintln!("{}", err);
+                exit(1);
+            } else {
+                exit(0);
+            }
         }
         ("get", Some(_matches)) => {
-            eprintln!("unimplemented");
-            exit(1);
+            let key = _matches.value_of("KEY").unwrap().to_string();
+
+            let result = store.get(key);
+            match result {
+                Ok(inner) => {
+                    println!("{}", inner);
+                    exit(0)
+                }
+                Err(err) => {
+                    eprintln!("{}", err);
+                    exit(1)
+                }
+            }
         }
         ("rm", Some(_matches)) => {
-            eprintln!("unimplemented");
-            exit(1);
+            let key = _matches.value_of("KEY").unwrap().to_string();
+            let result = store.remove(key);
+            match result {
+                Ok(_) => exit(0),
+                Err(err) => {
+                    eprintln!("{}", err);
+                    exit(1)
+                }
+            }
         }
         _ => unreachable!(),
     }
